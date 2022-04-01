@@ -18,17 +18,15 @@ public class MPJ_Lab2 {
 
     //Write data
     static float a = 0;
-    static float[][] MTZ = new float[N][N];
     static float[][] MA = new float[N][N];
     static float[] E = new float[N];
 
     public static void main(String[] args) {
         long start = System.currentTimeMillis();
+        Thread[] threads = new Thread[P];
         CountDownLatch waitMaxSearch = new CountDownLatch(P);
-        CountDownLatch waitCalc = new CountDownLatch(P);
         Semaphore access_a = new Semaphore(1);
         Semaphore access_E = new Semaphore(1);
-        Semaphore access_MTZ = new Semaphore(1);
         Semaphore access_MA = new Semaphore(1);
 
         System.out.println("Program started");
@@ -42,18 +40,54 @@ public class MPJ_Lab2 {
         System.out.println("Data successfully parsed");
 
         for (int i = 0; i < P; i++) {
-            new Thread(new singleT(N, P, i, start, a, B, D, E, MD, MT, MZ, MTZ, MA, waitMaxSearch,
-                    waitCalc, access_a, access_E, access_MTZ, access_MA)).start();
+            threads[i] = new Thread(new singleT(N, P, i, a, B, D, E, MD, MT, MZ, MA, waitMaxSearch,
+                    access_a, access_E, access_MA));
+            threads[i].start();
+        }
+
+        for (int i = 0; i < P; i++) {
+            try {
+                threads[i].join();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
+        try {
+            long finish = System.currentTimeMillis();
+            long timeExecuted = finish - start;
+            File resultMA = new File("resultMA.txt");
+            File resultE = new File("resultE.txt");
+            FileWriter writer1 = new FileWriter("resultMA.txt");
+            FileWriter writer2 = new FileWriter("resultE.txt");
+            for (int j = 0; j < N; j++) {
+                for (int k = 0; k < N; k++) {
+                    //System.out.print(MA[j][k] + " ");
+                    writer1.write(MA[j][k] + "\n");
+                }
+                //System.out.println();
+            }
+
+            for (int j = 0; j < N; j++) {
+                //System.out.print(E[j] + " ");
+                writer2.write(E[j] + "\n");
+            }
+            //System.out.println();
+            writer1.close();
+            writer2.close();
+            System.out.println("Data successfully saved on disk");
+            System.out.println(timeExecuted + " milliseconds spent on calculations");
+        } catch (IOException e) {
+            System.out.println("An error occurred.");
+            e.printStackTrace();
         }
     }
 }
 
 class singleT implements Runnable {
     private final CountDownLatch waitMaxSearch;
-    private final CountDownLatch waitCalc;
     private final Semaphore access_a;
     private final Semaphore access_E;
-    private final Semaphore access_MTZ;
     private final Semaphore access_MA;
     private final int N;
     private final int P;
@@ -62,23 +96,19 @@ class singleT implements Runnable {
     private final float[][] MD;
     private final float[][] MT;
     private final float[][] MZ;
-    private final float[][] MTZ;
     private final float[][] MA;
     private final float[] B;
     private final float[] D;
     private final float[] E;
     private float a;
-    private final long start;
 
-    public singleT(int N, int P, int pNum, long start, float a, float[] B, float[] D, float[] E,
-                   float[][] MD, float[][] MT, float[][] MZ, float[][] MTZ, float[][] MA,
-                   CountDownLatch waitMaxSearch, CountDownLatch waitCalc, Semaphore access_a,
-                   Semaphore access_E, Semaphore access_MTZ, Semaphore access_MA) {
+    public singleT(int N, int P, int pNum, float a, float[] B, float[] D, float[] E,
+                   float[][] MD, float[][] MT, float[][] MZ, float[][] MA,
+                   CountDownLatch waitMaxSearch, Semaphore access_a,
+                   Semaphore access_E, Semaphore access_MA) {
         this.waitMaxSearch = waitMaxSearch;
-        this.waitCalc = waitCalc;
         this.access_a = access_a;
         this.access_E = access_E;
-        this.access_MTZ = access_MTZ;
         this.access_MA = access_MA;
         this.N = N;
         this.P = P;
@@ -86,21 +116,17 @@ class singleT implements Runnable {
         this.MD = MD;
         this.MT = MT;
         this.MZ = MZ;
-        this.MTZ = MTZ;
         this.MA = MA;
         this.B = B;
         this.D = D;
         this.E = E;
         this.a = a;
-        this.start = start;
     }
 
     public void run() {
         float maxMD = 0;
         float[][] MTZpart = new float[N][N / P];
         float[][] MTDpart = new float[N][N / P];
-        float[][] MApart = new float[N][N / P];
-        float[] Epart = new float[N / P];
 
         System.out.println("Thread " + pNum + " started");
         //Calc max(MD)
@@ -115,7 +141,7 @@ class singleT implements Runnable {
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
-        
+
         if (maxMD > a) a = maxMD;
 
         access_a.release();
@@ -129,22 +155,19 @@ class singleT implements Runnable {
                 arrayToAdd[k + N] += D[k] * MT[j][k];
             }
             Arrays.sort(arrayToAdd);
+            float res = 0;
             for (int k = 0; k < 2 * N; k++) {
-                Epart[j - (N / P) * pNum] += arrayToAdd[k];
+                res += arrayToAdd[k];
             }
-        }
 
-        try {
-            access_E.acquire();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
+            try {
+                access_E.acquire();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            E[j] = res;
+            access_E.release();
         }
-
-        for (int i = (N / P) * pNum; i < (N / P) * (pNum + 1); i++) {
-            E[i] = Epart[i - (N / P) * pNum];
-        }
-
-        access_E.release();
 
         try {
             waitMaxSearch.await();
@@ -159,20 +182,6 @@ class singleT implements Runnable {
             }
         }
 
-        try {
-            access_MTZ.acquire();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-
-        for (int i = 0; i < N; i++) {
-            for (int j = (N / P) * pNum; j < (N / P) * (pNum + 1); j++) {
-                MTZ[i][j] = MTZpart[i][j - (N / P) * pNum];
-            }
-        }
-
-        access_MTZ.release();
-
         //Calc max(MD)*(MT+MZ)-MT*MD
         for (int j = 0; j < N; j++) {
             for (int k = (N / P) * (pNum); k < (N / P) * (pNum + 1); k++) {
@@ -185,59 +194,13 @@ class singleT implements Runnable {
                 for (int l = 0; l < N; l++) {
                     MTDpart[j][k - (N / P) * (pNum)] += arrayToAdd[l];
                 }
-                MApart[j][k - (N / P) * (pNum)] = MTZ[j][k] - MTDpart[j][k - (N / P) * (pNum)];
-            }
-        }
-
-        try {
-            access_MA.acquire();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-
-        for (int i = 0; i < N; i++) {
-            for (int j = (N / P) * pNum; j < (N / P) * (pNum + 1); j++) {
-                MA[i][j] = MApart[i][j - (N / P) * pNum];
-            }
-        }
-
-        access_MA.release();
-        waitCalc.countDown();
-
-        try {
-            waitCalc.await();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-
-        if (pNum == 0) {
-            try {
-                long finish = System.currentTimeMillis();
-                long timeExecuted = finish - start;
-                File resultMA = new File("resultMA.txt");
-                File resultE = new File("resultE.txt");
-                FileWriter writer1 = new FileWriter("resultMA.txt");
-                FileWriter writer2 = new FileWriter("resultE.txt");
-                for (int j = 0; j < N; j++) {
-                    for (int k = 0; k < N; k++) {
-                        //System.out.print(MA[j][k] + " ");
-                        writer1.write(MA[j][k] + "\n");
-                    }
-                    //System.out.println();
+                try {
+                    access_MA.acquire();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
                 }
-
-                for (int j = 0; j < N; j++) {
-                    //System.out.print(E[j] + " ");
-                    writer2.write(E[j] + "\n");
-                }
-                //System.out.println();
-                writer1.close();
-                writer2.close();
-                System.out.println("Data successfully saved on disk");
-                System.out.println(timeExecuted + " milliseconds spent on calculations");
-            } catch (IOException e) {
-                System.out.println("An error occurred.");
-                e.printStackTrace();
+                MA[j][k] = MTZpart[j][k - (N / P) * (pNum)] - MTDpart[j][k - (N / P) * (pNum)];
+                access_MA.release();
             }
         }
     }
